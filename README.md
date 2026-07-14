@@ -36,7 +36,7 @@
 
 ## 一键安装
 
-SSH 登录路由器后执行：
+SSH 登录路由器后优先使用 GitHub Raw：
 
 ```sh
 export url='https://raw.githubusercontent.com/MisakaXeon/Mi-BE6500PRO-Monitor/main' \
@@ -44,10 +44,22 @@ export url='https://raw.githubusercontent.com/MisakaXeon/Mi-BE6500PRO-Monitor/ma
   && . /etc/profile >/dev/null 2>&1
 ```
 
+如果 GitHub Raw 在当前网络无法访问或下载不稳定，可改用 jsDelivr：
+
+```sh
+export url='https://cdn.jsdelivr.net/gh/MisakaXeon/Mi-BE6500PRO-Monitor@main' \
+  && sh -c "$(curl -kfsSL $url/scripts/install.sh)" \
+  && . /etc/profile >/dev/null 2>&1
+```
+
+`url` 会同时作为二进制文件和管理脚本的下载源，因此使用上述命令后，整个安装
+过程都会通过 jsDelivr 完成。分支内容可能存在 CDN 缓存延迟；需要固定版本时，
+可将 `@main` 替换为仓库中已发布的版本标签。
+
 安装器会要求输入 `BE6500PRO` 确认型号，然后设置采集间隔、监听端口以及是否立即
 启动。默认端口为 `9898`，默认采集间隔为 `10` 秒。
 
-若系统只有 `wget`：
+若系统只有 `wget`，也可以将下方 `url` 替换为上述 jsDelivr 地址：
 
 ```sh
 export url='https://raw.githubusercontent.com/MisakaXeon/Mi-BE6500PRO-Monitor/main' \
