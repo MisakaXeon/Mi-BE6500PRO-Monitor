@@ -24,6 +24,20 @@ JSON API and an embedded responsive web dashboard.
 - Start, stop, restart, logs, interval, and port controls
 - Xiaomi boot integration and complete uninstallation
 
+## Screenshots
+
+### Desktop browser
+
+<p align="center">
+  <img src="docs/images/dashboard-desktop.png" alt="Mi BE6500 Pro Monitor desktop dashboard" width="100%">
+</p>
+
+### Mobile browser
+
+<p align="center">
+  <img src="docs/images/dashboard-mobile.jpg" alt="Mi BE6500 Pro Monitor mobile dashboard" width="360">
+</p>
+
 ## Requirements
 
 - Xiaomi BE6500 Pro with SSH unlocked and `root` access

@@ -21,6 +21,20 @@
 - 启动、停止、重启、日志、间隔和端口设置
 - 小米路由器开机自启管理与完整卸载
 
+## 效果预览
+
+### PC 浏览器
+
+<p align="center">
+  <img src="docs/images/dashboard-desktop.png" alt="小米 BE6500 Pro 性能监控 PC 面板" width="100%">
+</p>
+
+### 手机浏览器
+
+<p align="center">
+  <img src="docs/images/dashboard-mobile.jpg" alt="小米 BE6500 Pro 性能监控手机面板" width="360">
+</p>
+
 ## 环境要求
 
 - 小米 BE6500 Pro
