@@ -39,13 +39,26 @@ uninstaller removes these entries.
 
 ## One-line installation
 
-Run after signing in to the router over SSH:
+After signing in to the router over SSH, use GitHub Raw first:
 
 ```sh
 export url='https://raw.githubusercontent.com/MisakaXeon/Mi-BE6500PRO-Monitor/main' \
   && sh -c "$(curl -kfsSL $url/scripts/install.sh)" \
   && . /etc/profile >/dev/null 2>&1
 ```
+
+If GitHub Raw is unavailable or unstable on your network, use jsDelivr:
+
+```sh
+export url='https://cdn.jsdelivr.net/gh/MisakaXeon/Mi-BE6500PRO-Monitor@main' \
+  && sh -c "$(curl -kfsSL $url/scripts/install.sh)" \
+  && . /etc/profile >/dev/null 2>&1
+```
+
+The installer uses `url` for the binary and all management scripts, so the
+entire installation uses jsDelivr with this command. Branch content may be
+temporarily stale due to CDN caching; replace `@main` with a published version
+tag when an immutable installation source is required.
 
 The installer requires you to type `BE6500PRO` before continuing. It then asks
 for the sampling interval, listening port, and whether to start immediately.
@@ -102,3 +115,4 @@ public Internet. The installer downloads and executes code as root, so review
 ## License
 
 [MIT](LICENSE)
+
