@@ -1,0 +1,836 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>小米BE6500 Pro性能监控</title>
+  <script src="./echarts.min.js"></script>
+  <style>
+    :root {
+      --bg: #030813;
+      --panel: rgba(7, 17, 34, .76);
+      --panel-strong: rgba(10, 23, 44, .94);
+      --line: rgba(53, 212, 255, .22);
+      --line-strong: rgba(53, 212, 255, .46);
+      --text: #e9f8ff;
+      --muted: #7991a8;
+      --cyan: #35d4ff;
+      --green: #24f2a9;
+      --blue: #5f83ff;
+      --yellow: #ffc857;
+      --red: #ff5573;
+      --shadow: 0 18px 60px rgba(0, 0, 0, .34);
+      color-scheme: dark;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; }
+
+    body {
+      min-height: 100vh;
+      color: var(--text);
+      background:
+        radial-gradient(circle at 12% 18%, rgba(32, 221, 255, .18), transparent 28%),
+        radial-gradient(circle at 82% 8%, rgba(95, 131, 255, .16), transparent 32%),
+        linear-gradient(135deg, #03111e 0%, #07142a 48%, #030711 100%);
+      overflow: hidden;
+    }
+
+    #neural-bg {
+      position: fixed;
+      inset: 0;
+      z-index: -2;
+      opacity: .78;
+    }
+
+    .grid-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: -1;
+      pointer-events: none;
+      background-image:
+        linear-gradient(rgba(53, 212, 255, .055) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(53, 212, 255, .055) 1px, transparent 1px);
+      background-size: 44px 44px;
+      mask-image: linear-gradient(to bottom, rgba(0,0,0,.95), rgba(0,0,0,.28));
+    }
+
+    .app {
+      height: 100vh;
+      padding: clamp(12px, 1.4vw, 24px);
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr);
+      gap: clamp(10px, 1vw, 16px);
+    }
+
+    header {
+      display: grid;
+      grid-template-columns: minmax(280px, 1fr) minmax(460px, .8fr);
+      gap: 16px;
+      align-items: center;
+      min-height: 62px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-width: 0;
+    }
+
+    .mark {
+      width: 48px;
+      height: 48px;
+      border: 1px solid var(--line-strong);
+      border-radius: 8px;
+      background: linear-gradient(145deg, rgba(53,212,255,.18), rgba(36,242,169,.08));
+      box-shadow: 0 0 34px rgba(53,212,255,.22), inset 0 0 22px rgba(53,212,255,.1);
+      position: relative;
+      flex: 0 0 auto;
+    }
+
+    .mark:before, .mark:after {
+      content: "";
+      position: absolute;
+      inset: 11px;
+      border: 1px solid var(--cyan);
+      transform: rotate(45deg);
+      animation: pulse 3s ease-in-out infinite;
+    }
+
+    .mark:after {
+      inset: 17px;
+      border-color: var(--green);
+      animation-delay: -1s;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: .34; transform: rotate(45deg) scale(.92); }
+      50% { opacity: 1; transform: rotate(45deg) scale(1.12); }
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(24px, 2.1vw, 44px);
+      line-height: 1;
+      letter-spacing: 0;
+      text-transform: uppercase;
+      text-shadow: 0 0 24px rgba(53,212,255,.18);
+    }
+
+    .subtitle {
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 13px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .control-bar {
+      justify-self: end;
+      width: min(720px, 100%);
+      display: grid;
+      grid-template-columns: minmax(240px, 1fr) auto auto;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .input-wrap, .status-pill, button {
+      height: 42px;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      background: rgba(4, 12, 26, .72);
+      box-shadow: inset 0 0 18px rgba(53,212,255,.055);
+    }
+
+    .input-wrap {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 0 11px;
+      min-width: 0;
+    }
+
+    .input-wrap span {
+      color: var(--cyan);
+      font-size: 12px;
+      font-weight: 750;
+      white-space: nowrap;
+    }
+
+    input {
+      width: 100%;
+      min-width: 0;
+      border: 0;
+      outline: 0;
+      background: transparent;
+      color: var(--text);
+      font: inherit;
+    }
+
+    button {
+      padding: 0 16px;
+      color: var(--text);
+      font-weight: 760;
+      cursor: pointer;
+      background: linear-gradient(135deg, rgba(53,212,255,.16), rgba(95,131,255,.16));
+    }
+
+    button:hover { border-color: rgba(53,212,255,.7); }
+
+    .status-pill {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 0 12px;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--yellow);
+      box-shadow: 0 0 16px currentColor;
+    }
+
+    .online { color: var(--green); }
+    .online .dot { background: var(--green); }
+    .offline { color: var(--red); }
+    .offline .dot { background: var(--red); }
+
+    body.embedded header {
+      grid-template-columns: 1fr;
+    }
+
+    body.embedded .control-bar {
+      display: none;
+    }
+
+    .notice {
+      display: none;
+      position: fixed;
+      left: clamp(12px, 1.4vw, 24px);
+      right: clamp(12px, 1.4vw, 24px);
+      top: 84px;
+      z-index: 30;
+      padding: 10px 12px;
+      border: 1px solid rgba(255, 200, 87, .34);
+      border-radius: 8px;
+      color: #ffe0a0;
+      background: rgba(255, 200, 87, .075);
+      font-size: 13px;
+    }
+
+    .notice.show { display: block; }
+
+    .dashboard {
+      min-height: 0;
+      display: grid;
+      grid-template-columns: minmax(360px, .95fr) minmax(360px, 1fr) minmax(360px, 1fr);
+      grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+      gap: clamp(10px, 1vw, 16px);
+    }
+
+    .panel {
+      min-width: 0;
+      min-height: 0;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      box-shadow: var(--shadow), inset 0 1px 0 rgba(255,255,255,.05);
+      backdrop-filter: blur(14px);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .panel:before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background: linear-gradient(135deg, rgba(53,212,255,.1), transparent 34%, rgba(36,242,169,.055));
+      opacity: .76;
+    }
+
+    .panel > * { position: relative; }
+
+    .summary {
+      grid-row: 1 / 3;
+      display: grid;
+      grid-template-rows: auto minmax(260px, 1fr) auto;
+      gap: 12px;
+      padding: clamp(14px, 1vw, 18px);
+    }
+
+    .card {
+      padding: clamp(12px, .9vw, 16px);
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr);
+      gap: 8px;
+    }
+
+    .section-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      min-height: 22px;
+    }
+
+    .section-title h2 {
+      margin: 0;
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: 0;
+      color: #dcf7ff;
+    }
+
+    .meta {
+      color: var(--muted);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    .chart {
+      width: 100%;
+      height: 100%;
+      min-height: 180px;
+    }
+
+    .gauge-wrap {
+      display: grid;
+      place-items: center;
+      min-height: 0;
+    }
+
+    #cpu-gauge {
+      width: min(100%, 520px);
+      height: min(100%, 520px);
+      min-height: 260px;
+    }
+
+    .stat-row {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .mini-stat {
+      border: 1px solid rgba(53,212,255,.16);
+      border-radius: 8px;
+      background: rgba(3, 10, 22, .52);
+      padding: 12px;
+      min-width: 0;
+    }
+
+    .mini-stat .label {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .mini-stat .value {
+      margin-top: 6px;
+      font-size: clamp(20px, 1.7vw, 30px);
+      font-weight: 840;
+      white-space: nowrap;
+    }
+
+    .fallback {
+      display: none;
+      position: fixed;
+      left: 16px;
+      right: 16px;
+      bottom: 16px;
+      padding: 10px 12px;
+      border: 1px solid rgba(255, 85, 115, .42);
+      border-radius: 8px;
+      color: #ffd1da;
+      background: rgba(255, 85, 115, .1);
+      z-index: 20;
+    }
+
+    .fallback.show { display: block; }
+
+    @media (max-width: 1180px) {
+      body { overflow: auto; }
+      .app { height: auto; min-height: 100vh; }
+      header {
+        grid-template-columns: 1fr;
+        align-items: stretch;
+      }
+      .control-bar {
+        justify-self: stretch;
+        width: 100%;
+      }
+      .dashboard {
+        grid-template-columns: 1fr 1fr;
+        grid-template-rows: auto;
+      }
+      .summary {
+        grid-column: 1 / -1;
+        grid-row: auto;
+        min-height: 560px;
+      }
+      .panel { min-height: 300px; }
+    }
+
+    @media (max-width: 720px) {
+      body { overflow: auto; }
+      .app { padding: 10px; }
+      .control-bar { grid-template-columns: 1fr; }
+      .input-wrap, .status-pill, button { width: 100%; }
+      .dashboard { grid-template-columns: 1fr; }
+      .summary { min-height: auto; grid-template-rows: auto 320px auto; }
+      .panel { min-height: 280px; }
+      .stat-row { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <canvas id="neural-bg"></canvas>
+  <div class="grid-overlay"></div>
+  <main class="app">
+    <header>
+      <div class="brand">
+        <div class="mark" aria-hidden="true"></div>
+        <div>
+          <h1>Router Monitor</h1>
+          <div class="subtitle">小米BE6500 Pro性能监控</div>
+        </div>
+      </div>
+      <form class="control-bar" id="router-form">
+        <label class="input-wrap">
+          <span>ROUTER</span>
+          <input id="router-host" autocomplete="off" placeholder="192.168.31.1 或 192.168.31.1:9898">
+        </label>
+        <button type="submit">连接 / 保存</button>
+        <div class="status-pill" id="status-pill"><i class="dot"></i><span id="status-text">待连接</span></div>
+      </form>
+    </header>
+
+    <div class="notice" id="notice"></div>
+
+    <section class="dashboard">
+      <section class="panel summary">
+        <div class="section-title">
+          <h2>系统核心</h2>
+          <span class="meta" id="last-update">等待数据</span>
+        </div>
+        <div class="gauge-wrap"><div id="cpu-gauge"></div></div>
+        <div class="stat-row">
+          <div class="mini-stat"><div class="label">内存占用</div><div class="value" id="mem-small">--</div></div>
+          <div class="mini-stat"><div class="label">最高温度</div><div class="value" id="temp-small">--</div></div>
+          <div class="mini-stat"><div class="label">采样数</div><div class="value" id="sample-count">0</div></div>
+        </div>
+      </section>
+
+      <section class="panel card">
+        <div class="section-title"><h2>CPU 走势</h2><span class="meta">悬停查看详情</span></div>
+        <div class="chart" id="cpu-line"></div>
+      </section>
+
+      <section class="panel card">
+        <div class="section-title"><h2>内存走势</h2><span class="meta" id="mem-meta">--</span></div>
+        <div class="chart" id="memory-line"></div>
+      </section>
+
+      <section class="panel card">
+        <div class="section-title"><h2>峰值温度</h2><span class="meta">最高温区历史</span></div>
+        <div class="chart" id="temp-line"></div>
+      </section>
+
+      <section class="panel card">
+        <div class="section-title"><h2>温度分区</h2><span class="meta" id="zone-meta">--</span></div>
+        <div class="chart" id="zone-bar"></div>
+      </section>
+    </section>
+  </main>
+  <div class="fallback" id="fallback">ECharts 未加载。请确认 echarts.min.js 与 index.html 在同一目录。</div>
+
+  <script>
+    const STORAGE_KEY = "routerMonitor.endpoint";
+    const DEFAULT_HOST = location.host || "192.168.31.1:9898";
+    const MAX_POINTS = 120;
+    const DEFAULT_POLL_MS = 10000;
+    const EMBEDDED_MODE = isPrivateHost(location.hostname) || location.hostname === "localhost";
+
+    const state = {
+      endpoint: "",
+      timer: null,
+      pollMs: DEFAULT_POLL_MS,
+      samples: [],
+      charts: {}
+    };
+
+    const $ = (id) => document.getElementById(id);
+    const els = {
+      form: $("router-form"),
+      host: $("router-host"),
+      status: $("status-pill"),
+      statusText: $("status-text"),
+      notice: $("notice"),
+      fallback: $("fallback"),
+      memSmall: $("mem-small"),
+      tempSmall: $("temp-small"),
+      sampleCount: $("sample-count"),
+      lastUpdate: $("last-update"),
+      memMeta: $("mem-meta"),
+      zoneMeta: $("zone-meta"),
+      endpointLabel: null
+    };
+
+    function normalizeEndpoint(value) {
+      let raw = (value || "").trim() || DEFAULT_HOST;
+      if (!/^https?:\/\//i.test(raw)) raw = "http://" + raw;
+      const url = new URL(raw);
+      if (!url.port) url.port = "9898";
+      url.pathname = "/metrics.json";
+      url.search = "";
+      return url.toString();
+    }
+
+    function isPrivateHost(hostname) {
+      return /^(10|127)\./.test(hostname)
+        || /^192\.168\./.test(hostname)
+        || /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(hostname)
+        || hostname === "::1";
+    }
+
+    function displayHost(endpoint) {
+      try {
+        const url = new URL(endpoint);
+        return url.host;
+      } catch {
+        return DEFAULT_HOST;
+      }
+    }
+
+    function setStatus(mode, text) {
+      els.status.classList.remove("online", "offline");
+      if (mode) els.status.classList.add(mode);
+      els.statusText.textContent = text;
+    }
+
+    function showNotice(message) {
+      els.notice.textContent = message;
+      els.notice.classList.toggle("show", Boolean(message));
+    }
+
+    function formatPercent(value) {
+      return Number.isFinite(value) ? value.toFixed(1) + "%" : "--";
+    }
+
+    function formatTemp(value) {
+      return Number.isFinite(value) ? value.toFixed(1) + "°C" : "--";
+    }
+
+    function maxTemp(sample) {
+      const temps = sample?.temperatures || [];
+      return temps.reduce((max, zone) => Math.max(max, Number(zone.celsius) || 0), 0);
+    }
+
+    function pushSample(data) {
+      state.samples = [...state.samples, data].slice(-MAX_POINTS);
+    }
+
+    function axisStyle() {
+      return {
+        axisLine: { lineStyle: { color: "rgba(124, 158, 190, .22)" } },
+        axisLabel: { color: "#7991a8" },
+        splitLine: { lineStyle: { color: "rgba(124, 158, 190, .12)" } }
+      };
+    }
+
+    function tooltip(unit) {
+      return {
+        trigger: "axis",
+        backgroundColor: "rgba(4, 12, 26, .96)",
+        borderColor: "rgba(53, 212, 255, .42)",
+        textStyle: { color: "#e9f8ff" },
+        axisPointer: { lineStyle: { color: "#35d4ff" } },
+        formatter(params) {
+          const p = Array.isArray(params) ? params[0] : params;
+          return `${p.axisValue}<br>${p.marker}${p.seriesName}: <b>${Number(p.value).toFixed(1)}${unit}</b>`;
+        }
+      };
+    }
+
+    function initCharts() {
+      if (!window.echarts) {
+        els.fallback.classList.add("show");
+        return;
+      }
+      const dark = null;
+      state.charts.cpuGauge = echarts.init($("cpu-gauge"), dark, { renderer: "canvas" });
+      state.charts.cpuLine = echarts.init($("cpu-line"), dark, { renderer: "canvas" });
+      state.charts.memoryLine = echarts.init($("memory-line"), dark, { renderer: "canvas" });
+      state.charts.tempLine = echarts.init($("temp-line"), dark, { renderer: "canvas" });
+      state.charts.zoneBar = echarts.init($("zone-bar"), dark, { renderer: "canvas" });
+
+      state.charts.cpuGauge.setOption({
+        backgroundColor: "transparent",
+        series: [{
+          type: "gauge",
+          min: 0,
+          max: 100,
+          startAngle: 220,
+          endAngle: -40,
+          radius: "88%",
+          progress: { show: true, roundCap: true, width: 14, itemStyle: { color: "#35d4ff" } },
+          axisLine: { roundCap: true, lineStyle: { width: 14, color: [[1, "rgba(124,158,190,.16)"]] } },
+          pointer: { show: false },
+          axisTick: { show: false },
+          splitLine: { show: false },
+          axisLabel: { show: false },
+          detail: {
+            valueAnimation: true,
+            formatter: "{value}%",
+            color: "#e9f8ff",
+            fontSize: 54,
+            fontWeight: 800,
+            offsetCenter: [0, "0%"]
+          },
+          title: { show: true, offsetCenter: [0, "34%"], color: "#7991a8", fontSize: 13 },
+          data: [{ value: 0, name: "CPU 占用率" }]
+        }]
+      });
+
+      for (const chart of [state.charts.cpuLine, state.charts.memoryLine, state.charts.tempLine]) {
+        chart.setOption({
+          backgroundColor: "transparent",
+          grid: { left: 46, right: 20, top: 18, bottom: 32 },
+          xAxis: { type: "category", boundaryGap: false, data: [], axisLabel: { color: "#7991a8" }, axisLine: { lineStyle: { color: "rgba(124,158,190,.22)" } }, axisTick: { show: false } },
+          yAxis: { type: "value", min: 0, max: 100, ...axisStyle() },
+          tooltip: tooltip("%"),
+          series: [{ name: "value", type: "line", smooth: true, symbol: "circle", symbolSize: 5, data: [], lineStyle: { width: 3 }, areaStyle: {} }]
+        });
+      }
+
+      state.charts.zoneBar.setOption({
+        backgroundColor: "transparent",
+        grid: { left: 48, right: 22, top: 20, bottom: 54 },
+        tooltip: {
+          trigger: "axis",
+          backgroundColor: "rgba(4, 12, 26, .96)",
+          borderColor: "rgba(53, 212, 255, .42)",
+          textStyle: { color: "#e9f8ff" },
+          formatter(params) {
+            const p = params[0];
+            const zone = p.data?.zone || {};
+            return `${zone.zone || p.name}<br>${zone.type || "thermal"}<br>温度: <b>${Number(p.value).toFixed(1)}°C</b>`;
+          }
+        },
+        xAxis: { type: "category", data: [], axisLabel: { color: "#7991a8", interval: 0 }, axisLine: { lineStyle: { color: "rgba(124,158,190,.22)" } }, axisTick: { show: false } },
+        yAxis: { type: "value", min: 0, max: 100, ...axisStyle() },
+        series: [{
+          name: "温度",
+          type: "bar",
+          data: [],
+          barMaxWidth: 42,
+          itemStyle: {
+            borderRadius: [5, 5, 0, 0],
+            color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+              { offset: 0, color: "#ffc857" },
+              { offset: .55, color: "#35d4ff" },
+              { offset: 1, color: "#1a6d86" }
+            ])
+          }
+        }]
+      });
+
+      addEventListener("resize", resizeCharts);
+    }
+
+    function resizeCharts() {
+      Object.values(state.charts).forEach(chart => chart?.resize());
+    }
+
+    function chartSeries(color, fill) {
+      return {
+        lineStyle: { color, width: 3 },
+        itemStyle: { color },
+        areaStyle: {
+          color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+            { offset: 0, color: fill },
+            { offset: 1, color: "rgba(0,0,0,0)" }
+          ])
+        }
+      };
+    }
+
+    function dynamicAxisRange(values, options = {}) {
+      const data = values.filter(Number.isFinite);
+      if (!data.length) return { min: 0, max: 100 };
+
+      const floor = options.floor ?? 0;
+      const ceiling = options.ceiling ?? 100;
+      const minSpan = options.minSpan ?? 6;
+      const paddingRatio = options.paddingRatio ?? .22;
+      let min = Math.min(...data);
+      let max = Math.max(...data);
+      let span = max - min;
+
+      if (span < minSpan) {
+        const center = (min + max) / 2;
+        min = center - minSpan / 2;
+        max = center + minSpan / 2;
+        span = minSpan;
+      }
+
+      const padding = Math.max(span * paddingRatio, options.minPadding ?? 0);
+      min = Math.max(floor, min - padding);
+      max = Math.min(ceiling, max + padding);
+
+      if (max - min < minSpan && min <= floor) max = Math.min(ceiling, min + minSpan);
+      if (max - min < minSpan && max >= ceiling) min = Math.max(floor, max - minSpan);
+
+      return {
+        min: Number(min.toFixed(1)),
+        max: Number(max.toFixed(1))
+      };
+    }
+
+    function render(data) {
+      const cpu = Number(data?.cpu?.usage_percent) || 0;
+      const mem = data?.memory || {};
+      const memUsage = Number(mem.usage_percent) || 0;
+      const peak = maxTemp(data);
+      const labels = state.samples.map(s => new Date((s.time || Date.now() / 1000) * 1000).toLocaleTimeString());
+      const cpuData = state.samples.map(s => Number(s.cpu?.usage_percent) || 0);
+      const memData = state.samples.map(s => Number(s.memory?.usage_percent) || 0);
+      const tempData = state.samples.map(s => maxTemp(s));
+
+      els.memSmall.textContent = formatPercent(memUsage);
+      els.tempSmall.textContent = formatTemp(peak);
+      els.sampleCount.textContent = state.samples.length;
+      els.lastUpdate.textContent = data?.time ? new Date(data.time * 1000).toLocaleTimeString() : new Date().toLocaleTimeString();
+      els.memMeta.textContent = `${(Number(mem.used_mb) || 0).toFixed(0)} / ${(Number(mem.total_mb) || 0).toFixed(0)} MB`;
+      els.zoneMeta.textContent = `${(data.temperatures || []).length} 个分区`;
+
+      state.charts.cpuGauge?.setOption({ series: [{ progress: { itemStyle: { color: cpu > 80 ? "#ff5573" : cpu > 55 ? "#ffc857" : "#35d4ff" } }, data: [{ value: Number(cpu.toFixed(1)), name: "CPU 占用率" }] }] });
+      state.charts.cpuLine?.setOption({ xAxis: { data: labels }, yAxis: dynamicAxisRange(cpuData, { minSpan: 8 }), tooltip: tooltip("%"), series: [{ name: "CPU", data: cpuData, ...chartSeries("#35d4ff", "rgba(53,212,255,.22)") }] });
+      state.charts.memoryLine?.setOption({ xAxis: { data: labels }, yAxis: dynamicAxisRange(memData, { minSpan: 2, minPadding: .2 }), tooltip: tooltip("%"), series: [{ name: "Memory", data: memData, ...chartSeries("#24f2a9", "rgba(36,242,169,.18)") }] });
+      state.charts.tempLine?.setOption({ xAxis: { data: labels }, yAxis: dynamicAxisRange(tempData, { minSpan: 4, minPadding: .4 }), tooltip: tooltip("°C"), series: [{ name: "峰值温度", data: tempData, ...chartSeries("#ffc857", "rgba(255,200,87,.18)") }] });
+
+      const zones = data.temperatures || [];
+      state.charts.zoneBar?.setOption({
+        xAxis: { data: zones.map(z => z.zone?.replace("thermal_zone", "Z") || "zone") },
+        series: [{ data: zones.map(z => ({ value: Number(z.celsius) || 0, zone: z })) }]
+      });
+      resizeCharts();
+    }
+
+    async function fetchMetrics() {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 4500);
+      try {
+        const response = await fetch(state.endpoint, { cache: "no-store", signal: controller.signal });
+        if (!response.ok) throw new Error("HTTP " + response.status);
+        return await response.json();
+      } finally {
+        clearTimeout(timeout);
+      }
+    }
+
+    async function poll() {
+      if (!state.endpoint) return;
+      try {
+        const data = await fetchMetrics();
+        const serverInterval = Number(data?.refresh_interval_seconds);
+        if (Number.isFinite(serverInterval) && serverInterval > 0) {
+          state.pollMs = Math.max(1000, serverInterval * 1000);
+        }
+        pushSample(data);
+        setStatus("online", "在线");
+        showNotice("");
+        render(data);
+      } catch (error) {
+        setStatus("offline", "连接失败");
+        const mixed = location.protocol === "https:" && state.endpoint.startsWith("http://");
+        const extra = mixed ? "当前页面是 HTTPS，可能被浏览器拦截 HTTP 路由器接口。请用 HTTP 打开面板，或做 HTTPS 反代。" : "请确认路由器程序运行、端口正确、设备在同一局域网。";
+        showNotice(`无法连接 ${displayHost(state.endpoint)}。${extra}`);
+      } finally {
+        if (state.endpoint) {
+          state.timer = setTimeout(poll, state.pollMs);
+        }
+      }
+    }
+
+    function start(endpoint) {
+      state.endpoint = endpoint;
+      localStorage.setItem(STORAGE_KEY, endpoint);
+      els.host.value = displayHost(endpoint);
+      if (state.timer) clearTimeout(state.timer);
+      state.pollMs = DEFAULT_POLL_MS;
+      setStatus("", "连接中");
+      poll();
+    }
+
+    function startBackground() {
+      const canvas = $("neural-bg");
+      const ctx = canvas.getContext("2d");
+      const nodes = Array.from({ length: 86 }, () => ({ x: Math.random(), y: Math.random(), vx: (Math.random() - .5) * .00042, vy: (Math.random() - .5) * .00042 }));
+
+      function resize() {
+        const dpr = devicePixelRatio || 1;
+        canvas.width = innerWidth * dpr;
+        canvas.height = innerHeight * dpr;
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      }
+
+      function frame() {
+        ctx.clearRect(0, 0, innerWidth, innerHeight);
+        for (const n of nodes) {
+          n.x += n.vx; n.y += n.vy;
+          if (n.x < 0 || n.x > 1) n.vx *= -1;
+          if (n.y < 0 || n.y > 1) n.vy *= -1;
+        }
+        for (let i = 0; i < nodes.length; i++) {
+          for (let j = i + 1; j < nodes.length; j++) {
+            const a = nodes[i], b = nodes[j];
+            const ax = a.x * innerWidth, ay = a.y * innerHeight;
+            const bx = b.x * innerWidth, by = b.y * innerHeight;
+            const d = Math.hypot(ax - bx, ay - by);
+            if (d < 150) {
+              ctx.strokeStyle = `rgba(53,212,255,${(1 - d / 150) * .13})`;
+              ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
+            }
+          }
+        }
+        for (const n of nodes) {
+          ctx.fillStyle = "rgba(53,212,255,.42)";
+          ctx.beginPath(); ctx.arc(n.x * innerWidth, n.y * innerHeight, 1.3, 0, Math.PI * 2); ctx.fill();
+        }
+        requestAnimationFrame(frame);
+      }
+
+      addEventListener("resize", () => { resize(); resizeCharts(); });
+      resize();
+      frame();
+    }
+
+    els.form.addEventListener("submit", event => {
+      event.preventDefault();
+      try {
+        start(normalizeEndpoint(els.host.value));
+      } catch {
+        showNotice("地址格式不正确，请输入类似 192.168.31.1 或 192.168.31.1:9898");
+      }
+    });
+
+    initCharts();
+    startBackground();
+    if (EMBEDDED_MODE) {
+      document.body.classList.add("embedded");
+      start(normalizeEndpoint(DEFAULT_HOST));
+    } else {
+      start(localStorage.getItem(STORAGE_KEY) || normalizeEndpoint(DEFAULT_HOST));
+    }
+  </script>
+</body>
+</html>
+
