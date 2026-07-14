@@ -1,0 +1,41 @@
+name: Test and build
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Restore vendored ECharts when bootstrapping the repository
+        if: ${{ !hashFiles('web/echarts.min.js') }}
+        run: |
+          curl -fsSL https://cdn.jsdelivr.net/npm/echarts@5.6.0/dist/echarts.min.js -o web/echarts.min.js
+          echo "bf4a223524e40b77c304bec67e1222cf551f14880cf42c69dc046558e11c07b1  web/echarts.min.js" | sha256sum -c -
+      - name: Test
+        run: go test ./...
+      - name: Build ARM64
+        env:
+          CGO_ENABLED: "0"
+          GOOS: linux
+          GOARCH: arm64
+        run: go build -trimpath -ldflags="-s -w" -o bin/router-monitor_linux_arm64 .
+      - name: Publish generated assets
+        if: ${{ github.event_name == 'push' && github.actor != 'github-actions[bot]' }}
+        run: |
+          git add web/echarts.min.js bin/router-monitor_linux_arm64
+          git diff --cached --quiet && exit 0
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git commit -m "build: refresh ARM64 release assets"
+          git push
+
