@@ -1,0 +1,204 @@
+#!/bin/sh
+
+INSTALL_DIR=${INSTALL_DIR:-/data/other_vol/router-monitor}
+CFG="$INSTALL_DIR/config.env"
+START_SH="$INSTALL_DIR/start.sh"
+BOOT_SH="$INSTALL_DIR/boot.sh"
+AUTO_START="/data/auto_start.sh"
+
+RED='\033[31m'
+GREEN='\033[32m'
+YELLOW='\033[33m'
+BLUE='\033[36m'
+WHITE_BG='\033[30;47m'
+RESET='\033[0m'
+
+cecho() {
+    printf '%b\n' "$*"
+}
+
+[ -f "$CFG" ] && . "$CFG"
+
+LISTEN=${LISTEN:-0.0.0.0:9898}
+INTERVAL=${INTERVAL:-10s}
+
+save_config() {
+    cat >"$CFG" <<EOF
+LISTEN=$LISTEN
+INTERVAL=$INTERVAL
+INSTALL_DIR=$INSTALL_DIR
+EOF
+}
+
+normalize_seconds() {
+    val="$1"
+    case "$val" in
+        [1-9])
+            echo "${val}s"
+            return 0
+            ;;
+        [1-9][0-9]*)
+            echo "${val}s"
+            return 0
+            ;;
+        [1-9][0-9]*s)
+            echo "$val"
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+pause() {
+    echo
+    printf "%b" "${YELLOW}按回车键继续...${RESET}"
+    read dummy
+}
+
+is_autostart_on() {
+    grep -q "RouterMonitor" "$AUTO_START" 2>/dev/null
+}
+
+write_boot_script() {
+    cat >"$BOOT_SH" <<EOF
+#!/bin/sh
+sleep 30
+if [ -f /etc/profile ]; then
+  sed -i '/RouterMonitor alias/d' /etc/profile 2>/dev/null
+  sed -i '/alias rmmon=.*router-monitor\\/rmmon/d' /etc/profile 2>/dev/null
+  sed -i '/export ROUTER_MONITOR_DIR=/d' /etc/profile 2>/dev/null
+  echo 'alias rmmon="sh $INSTALL_DIR/rmmon" #RouterMonitor alias' >>/etc/profile
+  echo 'export ROUTER_MONITOR_DIR="$INSTALL_DIR" #RouterMonitor alias' >>/etc/profile
+fi
+$START_SH start >/dev/null 2>&1
+EOF
+    chmod 755 "$BOOT_SH"
+}
+
+enable_autostart() {
+    write_boot_script
+    [ -f "$AUTO_START" ] || echo "# custom auto start commands" >"$AUTO_START"
+    sed -i '/RouterMonitor/d' "$AUTO_START" 2>/dev/null
+    echo "$BOOT_SH & #RouterMonitor" >>"$AUTO_START"
+
+    if command -v uci >/dev/null 2>&1; then
+        uci delete firewall.RouterMonitor 2>/dev/null
+        uci set firewall.RouterMonitor=include
+        uci set firewall.RouterMonitor.type='script'
+        uci set firewall.RouterMonitor.path="$BOOT_SH"
+        uci set firewall.RouterMonitor.enabled='1'
+        uci commit firewall
+    fi
+    cecho "${GREEN}开机自启已设置${RESET}"
+}
+
+disable_autostart() {
+    sed -i '/RouterMonitor/d' "$AUTO_START" 2>/dev/null
+    if command -v uci >/dev/null 2>&1; then
+        uci delete firewall.RouterMonitor 2>/dev/null
+        uci commit firewall 2>/dev/null
+    fi
+    cecho "${GREEN}开机自启已关闭${RESET}"
+}
+
+set_interval() {
+    cecho "当前监控间隔：${BLUE}$INTERVAL${RESET}"
+    printf "%b" "${YELLOW}请输入新的间隔，单位：秒 > ${RESET}"
+    read val
+    INTERVAL=$(normalize_seconds "$val") || {
+        cecho "${RED}输入无效，请输入正整数秒数${RESET}"
+        return 1
+    }
+    save_config
+    "$START_SH" restart
+}
+
+set_port() {
+    port=${LISTEN##*:}
+    cecho "当前端口：${BLUE}$port${RESET}"
+    printf "%b" "${YELLOW}请输入新端口，默认 9898 > ${RESET}"
+    read val
+    case "$val" in
+        "" ) val=9898 ;;
+    esac
+    case "$val" in
+        [1-9][0-9]*)
+            LISTEN="0.0.0.0:$val"
+            save_config
+            "$START_SH" restart
+            ;;
+        *)
+            cecho "${RED}输入无效${RESET}"
+            ;;
+    esac
+}
+
+uninstall_rmmon() {
+    cecho "${YELLOW}即将停止并删除 $INSTALL_DIR${RESET}"
+    printf "%b" "${RED}确认卸载？输入 YES > ${RESET}"
+    read res
+    [ "$res" = "YES" ] || return 0
+    "$START_SH" stop
+    disable_autostart
+    if [ -w /etc/profile ]; then
+        sed -i '/RouterMonitor alias/d' /etc/profile 2>/dev/null
+        sed -i '/alias rmmon=.*router-monitor\/rmmon/d' /etc/profile 2>/dev/null
+        sed -i '/export ROUTER_MONITOR_DIR=/d' /etc/profile 2>/dev/null
+    fi
+    for cmd in /usr/bin/rmmon /bin/rmmon /sbin/rmmon /usr/sbin/rmmon; do
+        [ -f "$cmd" ] && grep -q 'router-monitor/rmmon' "$cmd" 2>/dev/null && rm -f "$cmd"
+    done
+    rm -rf "$INSTALL_DIR"
+    cecho "${GREEN}已卸载${RESET}"
+    exit 0
+}
+
+case "$1" in
+    start|stop|restart|status|metrics|log)
+        "$START_SH" "$@"
+        exit $?
+        ;;
+esac
+
+while true; do
+    clear 2>/dev/null
+    cecho "${BLUE}========================================${RESET}"
+    cecho " ${GREEN}Router Monitor 管理菜单${RESET}"
+    cecho "${BLUE}========================================${RESET}"
+    "$START_SH" status
+    if is_autostart_on; then auto="ON"; else auto="OFF"; fi
+    [ "$auto" = "ON" ] && auto_color="${GREEN}$auto${RESET}" || auto_color="${YELLOW}$auto${RESET}"
+    cecho "开机自启：$auto_color"
+    cecho "${BLUE}----------------------------------------${RESET}"
+    cecho " ${GREEN}1${RESET}. 启动监控"
+    cecho " ${GREEN}2${RESET}. 停止监控"
+    cecho " ${GREEN}3${RESET}. 重启监控"
+    cecho " ${GREEN}4${RESET}. 查看当前数据"
+    cecho " ${GREEN}5${RESET}. 设置监控间隔"
+    cecho " ${GREEN}6${RESET}. 设置监听端口"
+    cecho " ${GREEN}7${RESET}. 设置开机自启"
+    cecho " ${GREEN}8${RESET}. 关闭开机自启"
+    cecho " ${GREEN}9${RESET}. 查看日志"
+    cecho "${RED}10${RESET}. 卸载"
+    cecho " ${WHITE_BG}0${RESET}. 退出"
+    cecho "${BLUE}----------------------------------------${RESET}"
+    printf "%b" "${YELLOW}请输入选项 > ${RESET}"
+    read num
+    case "$num" in
+        1) "$START_SH" start; pause ;;
+        2) "$START_SH" stop; pause ;;
+        3) "$START_SH" restart; pause ;;
+        4) "$START_SH" metrics; pause ;;
+        5) set_interval; pause ;;
+        6) set_port; pause ;;
+        7) enable_autostart; pause ;;
+        8) disable_autostart; pause ;;
+        9) "$START_SH" log 80; pause ;;
+        10) uninstall_rmmon ;;
+        0|"") exit 0 ;;
+        *) cecho "${RED}输入无效${RESET}"; pause ;;
+    esac
+done
+
