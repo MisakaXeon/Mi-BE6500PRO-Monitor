@@ -1,10 +1,15 @@
 # Mi BE6500 Pro Monitor
 
-English | [简体中文](README.md)
+English | [简体中文](README.md) | [Changelog](CHANGELOG_EN.md)
 
 A lightweight performance monitor for SSH-unlocked Xiaomi BE6500 Pro routers.
 One static ARM64 binary collects CPU, memory, and thermal data while serving a
 JSON API and an embedded responsive web dashboard.
+
+> [!NOTE]
+> **Latest release: v1.1.0** - Fixes slow dashboard and `/metrics.json` responses
+> after long runtimes and adds online updates with SHA-256 verification and rollback.
+> See the [full changelog](CHANGELOG_EN.md).
 
 > [!CAUTION]
 > This project supports and has only been verified on the Xiaomi BE6500 Pro.

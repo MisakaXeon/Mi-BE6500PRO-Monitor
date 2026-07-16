@@ -1,9 +1,13 @@
 # Mi BE6500 Pro Monitor
 
-[English](README_EN.md) | 简体中文
+[English](README_EN.md) | 简体中文 | [更新日志](CHANGELOG.md)
 
 面向已解锁 SSH 的小米 BE6500 Pro 的轻量级性能监控程序。单个静态 ARM64
 二进制提供 CPU、内存和温度采集、JSON 接口以及内嵌的响应式 Web 面板。
+
+> [!NOTE]
+> **最新版本：v1.1.0** - 修复长时间运行后 Web 面板和 `/metrics.json` 响应缓慢的问题，
+> 并新增带 SHA-256 校验与失败回滚的在线更新。查看[完整更新日志](CHANGELOG.md)。
 
 > [!CAUTION]
 > 本项目仅支持并仅在小米 BE6500 Pro 上完成验证。其他路由器的 thermal zone
