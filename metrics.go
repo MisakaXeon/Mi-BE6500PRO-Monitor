@@ -275,6 +275,8 @@ func writeJSON(w http.ResponseWriter, value any) {
 }
 
 func newMux(store *Store) *http.ServeMux {
+	indexContent, indexErr := webAssets.ReadFile("web/index.html")
+	echartsContent, echartsErr := webAssets.ReadFile("web/echarts.min.js")
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
@@ -283,22 +285,22 @@ func newMux(store *Store) *http.ServeMux {
 		}
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		content, err := webAssets.ReadFile("web/index.html")
-		if err != nil {
+		w.Header().Set("Cache-Control", "no-cache")
+		if indexErr != nil {
 			http.Error(w, "index.html not found", http.StatusInternalServerError)
 			return
 		}
-		_, _ = w.Write(content)
+		_, _ = w.Write(indexContent)
 	})
 	mux.HandleFunc("/echarts.min.js", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
-		content, err := webAssets.ReadFile("web/echarts.min.js")
-		if err != nil {
+		w.Header().Set("Cache-Control", "public, max-age=604800")
+		if echartsErr != nil {
 			http.Error(w, "echarts.min.js not found", http.StatusInternalServerError)
 			return
 		}
-		_, _ = w.Write(content)
+		_, _ = w.Write(echartsContent)
 	})
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]string{"status": "ok"})

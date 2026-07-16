@@ -249,6 +249,56 @@ func TestCollectOnceReportsErrors(t *testing.T) {
 	}
 }
 
+func TestCollectOnceWithPreviousCPU(t *testing.T) {
+	root := t.TempDir()
+	proc := filepath.Join(root, "proc")
+	thermal := filepath.Join(root, "thermal")
+	if err := os.MkdirAll(proc, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(proc, "stat"), []byte("cpu  150 0 150 900 0 0 0 0 0 0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(proc, "meminfo"), []byte("MemTotal: 1024000 kB\nMemAvailable: 512000 kB\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	zone := filepath.Join(thermal, "thermal_zone0")
+	if err := os.MkdirAll(zone, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(zone, "type"), []byte("cpu-thermal"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(zone, "temp"), []byte("57000"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	snapshot, current := collectOnceWithPreviousCPU(proc, thermal, CPUStat{Idle: 800, Total: 1000})
+	if snapshot.Error != "" {
+		t.Fatalf("snapshot error = %q", snapshot.Error)
+	}
+	if snapshot.CPU.UsagePercent != 50 || snapshot.Memory.UsagePercent != 50 {
+		t.Fatalf("unexpected utilization: %+v", snapshot)
+	}
+	if len(snapshot.Temperatures) != 1 || snapshot.Temperatures[0].Celsius != 57 {
+		t.Fatalf("unexpected temperatures: %+v", snapshot.Temperatures)
+	}
+	if current.Total != 1200 || current.Idle != 900 {
+		t.Fatalf("current CPU stat = %+v", current)
+	}
+}
+
+func TestCollectOnceWithPreviousCPUReportsReadError(t *testing.T) {
+	previous := CPUStat{Idle: 8, Total: 10}
+	snapshot, current := collectOnceWithPreviousCPU(filepath.Join(t.TempDir(), "missing"), t.TempDir(), previous)
+	if !strings.Contains(snapshot.Error, "read cpu") {
+		t.Fatalf("expected CPU error, got %+v", snapshot)
+	}
+	if current != previous {
+		t.Fatalf("current CPU stat = %+v, want %+v", current, previous)
+	}
+}
+
 func TestStoreAndWriteJSON(t *testing.T) {
 	store := &Store{}
 	store.Set(Snapshot{Time: 123, CPU: CPUInfo{UsagePercent: 12.5}})
@@ -312,4 +362,3 @@ func TestMuxEndpoints(t *testing.T) {
 		t.Fatalf("unexpected echarts response: %d", echarts.Code)
 	}
 }
-

@@ -22,6 +22,8 @@ JSON API and an embedded responsive web dashboard.
 - `GET /health` health endpoint
 - Interactive `rmmon` management menu
 - Start, stop, restart, logs, interval, and port controls
+- Online update checks with GitHub/jsDelivr fallback, SHA-256 verification,
+  and automatic rollback
 - Xiaomi boot integration and complete uninstallation
 
 ## Screenshots
@@ -93,6 +95,8 @@ rmmon status
 rmmon metrics
 rmmon restart
 rmmon log 100
+rmmon check-update
+rmmon update
 ```
 
 Open the dashboard or JSON endpoint:
@@ -102,9 +106,30 @@ http://ROUTER_IP:9898/
 http://ROUTER_IP:9898/metrics.json
 ```
 
+## Online updates
+
+Use **Check for updates** or **Online update** in `rmmon`, or run the direct
+commands above. The updater tries the source recorded during installation,
+then deduplicates and falls back between jsDelivr and GitHub Raw. Each attempt downloads one complete release from a
+single source and validates every asset against `checksums.txt` before stopping
+the running service.
+
+Updates preserve `config.env`, including the listen port, sampling interval,
+and preferred update source. A service that was running is restarted; a stopped
+service remains stopped. If startup or `/health` fails, the previous release is
+restored automatically. An interrupted replacement is also detected and
+recovered the next time an update command runs.
+
+Updates are manual and are never checked during boot or in the background.
+SHA-256 detects corrupted downloads and inconsistent CDN caches; it does not
+replace trust in the GitHub repository itself. Plain HTTP is rejected by
+default. `RM_UPDATE_INSECURE=1` is intended only for temporary testing on a
+controlled LAN; it also disables HTTPS certificate verification and should not
+be stored in persistent configuration.
+
 ## Uninstall
 
-Run `rmmon`, select `10. Uninstall`, and type `YES` when prompted.
+Run `rmmon`, select `12. Uninstall`, and type `YES` when prompted.
 
 ## Build from source
 
@@ -113,7 +138,9 @@ Go 1.26 or a compatible version is required:
 ```sh
 go test ./...
 CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build \
-  -trimpath -ldflags="-s -w" -o bin/router-monitor_linux_arm64 .
+  -trimpath -ldflags="-s -w -X main.version=$(cat VERSION)" \
+  -o bin/router-monitor_linux_arm64 .
+sh scripts/generate_checksums.sh
 ```
 
 The dashboard is compiled into the binary with `go:embed`; no separate static
@@ -129,4 +156,3 @@ public Internet. The installer downloads and executes code as root, so review
 ## License
 
 [MIT](LICENSE)
-

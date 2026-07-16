@@ -1,10 +1,16 @@
 #!/bin/sh
 
+set -f
+
 INSTALL_DIR=${INSTALL_DIR:-/data/other_vol/router-monitor}
 CFG="$INSTALL_DIR/config.env"
 START_SH="$INSTALL_DIR/start.sh"
+UPDATE_SH="$INSTALL_DIR/update.sh"
 BOOT_SH="$INSTALL_DIR/boot.sh"
 AUTO_START="/data/auto_start.sh"
+VERSION_FILE="$INSTALL_DIR/VERSION"
+UPDATE_LOCK="$INSTALL_DIR/.update.lock"
+DEFAULT_UPDATE_URL="https://cdn.jsdelivr.net/gh/MisakaXeon/Mi-BE6500PRO-Monitor@main"
 
 RED='\033[31m'
 GREEN='\033[32m'
@@ -17,38 +23,121 @@ cecho() {
     printf '%b\n' "$*"
 }
 
-[ -f "$CFG" ] && . "$CFG"
+valid_port() {
+    case "$1" in
+        ""|*[!0-9]*) return 1 ;;
+    esac
+    [ "$1" -ge 1 ] 2>/dev/null && [ "$1" -le 65535 ] 2>/dev/null
+}
 
-LISTEN=${LISTEN:-0.0.0.0:9898}
-INTERVAL=${INTERVAL:-10s}
+valid_interval() {
+    case "$1" in
+        *s) seconds=${1%s} ;;
+        *) return 1 ;;
+    esac
+    case "$seconds" in
+        ""|*[!0-9]*) return 1 ;;
+    esac
+    [ "$seconds" -ge 1 ] 2>/dev/null
+}
+
+valid_listen() {
+    listen_port=${1##*:}
+    valid_port "$listen_port"
+}
+
+valid_update_url() {
+    case "$1" in
+        https://*) ;;
+        http://*) [ "${RM_UPDATE_INSECURE:-0}" = "1" ] || return 1 ;;
+        *) return 1 ;;
+    esac
+    case "$1" in
+        *[!a-zA-Z0-9:/?\&=%._@+~-]*) return 1 ;;
+    esac
+    return 0
+}
+
+load_config() {
+    [ -f "$CFG" ] || return 0
+    while IFS= read -r config_line || [ -n "$config_line" ]; do
+        config_line=$(printf '%s' "$config_line" | tr -d '\r')
+        case "$config_line" in
+            ""|\#*) continue ;;
+        esac
+        config_key=${config_line%%=*}
+        [ "$config_key" != "$config_line" ] || continue
+        config_value=${config_line#*=}
+        case "$config_key" in
+            LISTEN) valid_listen "$config_value" && CONFIG_LISTEN="$config_value" ;;
+            INTERVAL) valid_interval "$config_value" && CONFIG_INTERVAL="$config_value" ;;
+            UPDATE_URL) valid_update_url "$config_value" && CONFIG_UPDATE_URL="$config_value" ;;
+        esac
+    done <"$CFG"
+}
+
+load_config
+
+LISTEN=${CONFIG_LISTEN:-0.0.0.0:9898}
+INTERVAL=${CONFIG_INTERVAL:-10s}
+UPDATE_URL=${CONFIG_UPDATE_URL:-$DEFAULT_UPDATE_URL}
 
 save_config() {
-    cat >"$CFG" <<EOF
+    valid_listen "$LISTEN" || return 1
+    valid_interval "$INTERVAL" || return 1
+    valid_update_url "$UPDATE_URL" || return 1
+    config_tmp="$CFG.tmp.$$"
+    cat >"$config_tmp" <<EOF
 LISTEN=$LISTEN
 INTERVAL=$INTERVAL
 INSTALL_DIR=$INSTALL_DIR
+UPDATE_URL=$UPDATE_URL
 EOF
+    chmod 600 "$config_tmp" 2>/dev/null || true
+    mv "$config_tmp" "$CFG"
+}
+
+current_version() {
+    if [ -s "$VERSION_FILE" ]; then
+        sed -n '1p' "$VERSION_FILE" | tr -d '\r\n'
+    elif [ -x "$INSTALL_DIR/router-monitor" ]; then
+        "$INSTALL_DIR/router-monitor" -version 2>/dev/null | sed -n '1p' | tr -d '\r\n'
+    else
+        echo "unknown"
+    fi
+}
+
+update_in_progress() {
+    [ -d "$UPDATE_LOCK" ] || return 1
+    owner_record=$(cat "$UPDATE_LOCK/owner" 2>/dev/null)
+    owner=${owner_record%% *}
+    expected_start=${owner_record#* }
+    [ -n "$owner" ] || return 1
+    [ "$expected_start" != "$owner_record" ] || return 1
+    kill -0 "$owner" 2>/dev/null || return 1
+    actual_start=$(awk '{print $22}' "/proc/$owner/stat" 2>/dev/null)
+    [ -n "$actual_start" ] && [ "$actual_start" = "$expected_start" ]
+}
+
+ensure_update_idle() {
+    if update_in_progress; then
+        cecho "${YELLOW}在线更新正在进行，请稍后再操作${RESET}"
+        return 1
+    fi
+    return 0
 }
 
 normalize_seconds() {
     val="$1"
     case "$val" in
-        [1-9])
-            echo "${val}s"
-            return 0
-            ;;
-        [1-9][0-9]*)
-            echo "${val}s"
-            return 0
-            ;;
-        [1-9][0-9]*s)
-            echo "$val"
-            return 0
-            ;;
-        *)
-            return 1
-            ;;
+        *s) raw_seconds=${val%s} ;;
+        *) raw_seconds=$val ;;
     esac
+    case "$raw_seconds" in
+        ""|*[!0-9]*) return 1 ;;
+    esac
+    [ "$raw_seconds" -ge 1 ] 2>/dev/null || return 1
+    echo "${raw_seconds}s"
 }
 
 pause() {
@@ -58,13 +147,16 @@ pause() {
 }
 
 is_autostart_on() {
+    if command -v uci >/dev/null 2>&1 && \
+       [ "$(uci -q get firewall.RouterMonitor.enabled 2>/dev/null)" = "1" ]; then
+        return 0
+    fi
     grep -q "RouterMonitor" "$AUTO_START" 2>/dev/null
 }
 
 write_boot_script() {
     cat >"$BOOT_SH" <<EOF
 #!/bin/sh
-sleep 30
 if [ -f /etc/profile ]; then
   sed -i '/RouterMonitor alias/d' /etc/profile 2>/dev/null
   sed -i '/alias rmmon=.*router-monitor\\/rmmon/d' /etc/profile 2>/dev/null
@@ -77,24 +169,36 @@ EOF
     chmod 755 "$BOOT_SH"
 }
 
-enable_autostart() {
-    write_boot_script
+enable_auto_start_file() {
     [ -f "$AUTO_START" ] || echo "# custom auto start commands" >"$AUTO_START"
     sed -i '/RouterMonitor/d' "$AUTO_START" 2>/dev/null
-    echo "$BOOT_SH & #RouterMonitor" >>"$AUTO_START"
+    echo "$BOOT_SH #RouterMonitor" >>"$AUTO_START"
+}
 
+enable_autostart() {
+    ensure_update_idle || return 1
+    write_boot_script
+    configured=0
     if command -v uci >/dev/null 2>&1; then
+        sed -i '/RouterMonitor/d' "$AUTO_START" 2>/dev/null
         uci delete firewall.RouterMonitor 2>/dev/null
-        uci set firewall.RouterMonitor=include
-        uci set firewall.RouterMonitor.type='script'
-        uci set firewall.RouterMonitor.path="$BOOT_SH"
-        uci set firewall.RouterMonitor.enabled='1'
-        uci commit firewall
+        if uci set firewall.RouterMonitor=include && \
+           uci set firewall.RouterMonitor.type='script' && \
+           uci set firewall.RouterMonitor.path="$BOOT_SH" && \
+           uci set firewall.RouterMonitor.enabled='1' && \
+           uci commit firewall; then
+            configured=1
+        fi
+    fi
+    if [ "$configured" -ne 1 ]; then
+        enable_auto_start_file
+        cecho "${YELLOW}UCI 自启不可用，已改用 /data/auto_start.sh${RESET}"
     fi
     cecho "${GREEN}开机自启已设置${RESET}"
 }
 
 disable_autostart() {
+    ensure_update_idle || return 1
     sed -i '/RouterMonitor/d' "$AUTO_START" 2>/dev/null
     if command -v uci >/dev/null 2>&1; then
         uci delete firewall.RouterMonitor 2>/dev/null
@@ -104,18 +208,32 @@ disable_autostart() {
 }
 
 set_interval() {
+    ensure_update_idle || return 1
     cecho "当前监控间隔：${BLUE}$INTERVAL${RESET}"
     printf "%b" "${YELLOW}请输入新的间隔，单位：秒 > ${RESET}"
     read val
-    INTERVAL=$(normalize_seconds "$val") || {
+    new_interval=$(normalize_seconds "$val") || {
         cecho "${RED}输入无效，请输入正整数秒数${RESET}"
         return 1
     }
-    save_config
-    "$START_SH" restart
+    old_interval=$INTERVAL
+    INTERVAL=$new_interval
+    save_config || {
+        INTERVAL=$old_interval
+        cecho "${RED}保存配置失败${RESET}"
+        return 1
+    }
+    if ! "$START_SH" restart; then
+        INTERVAL=$old_interval
+        save_config
+        "$START_SH" start >/dev/null 2>&1
+        cecho "${RED}新间隔启动失败，已恢复原配置${RESET}"
+        return 1
+    fi
 }
 
 set_port() {
+    ensure_update_idle || return 1
     port=${LISTEN##*:}
     cecho "当前端口：${BLUE}$port${RESET}"
     printf "%b" "${YELLOW}请输入新端口，默认 9898 > ${RESET}"
@@ -123,19 +241,28 @@ set_port() {
     case "$val" in
         "" ) val=9898 ;;
     esac
-    case "$val" in
-        [1-9][0-9]*)
-            LISTEN="0.0.0.0:$val"
-            save_config
-            "$START_SH" restart
-            ;;
-        *)
-            cecho "${RED}输入无效${RESET}"
-            ;;
-    esac
+    valid_port "$val" || {
+        cecho "${RED}端口必须在 1-65535 之间${RESET}"
+        return 1
+    }
+    old_listen=$LISTEN
+    LISTEN="0.0.0.0:$val"
+    save_config || {
+        LISTEN=$old_listen
+        cecho "${RED}保存配置失败${RESET}"
+        return 1
+    }
+    if ! "$START_SH" restart; then
+        LISTEN=$old_listen
+        save_config
+        "$START_SH" start >/dev/null 2>&1
+        cecho "${RED}新端口无法启动，已恢复原配置和服务${RESET}"
+        return 1
+    fi
 }
 
 uninstall_rmmon() {
+    ensure_update_idle || return 1
     cecho "${YELLOW}即将停止并删除 $INSTALL_DIR${RESET}"
     printf "%b" "${RED}确认卸载？输入 YES > ${RESET}"
     read res
@@ -160,6 +287,20 @@ case "$1" in
         "$START_SH" "$@"
         exit $?
         ;;
+    check-update)
+        [ -x "$UPDATE_SH" ] || { cecho "${RED}更新组件不存在：$UPDATE_SH${RESET}"; exit 1; }
+        "$UPDATE_SH" check
+        exit $?
+        ;;
+    update)
+        [ -x "$UPDATE_SH" ] || { cecho "${RED}更新组件不存在：$UPDATE_SH${RESET}"; exit 1; }
+        "$UPDATE_SH" install
+        exit $?
+        ;;
+    refresh-boot)
+        write_boot_script
+        exit $?
+        ;;
 esac
 
 while true; do
@@ -168,6 +309,7 @@ while true; do
     cecho " ${GREEN}Router Monitor 管理菜单${RESET}"
     cecho "${BLUE}========================================${RESET}"
     "$START_SH" status
+    cecho "版本：${BLUE}$(current_version)${RESET}"
     if is_autostart_on; then auto="ON"; else auto="OFF"; fi
     [ "$auto" = "ON" ] && auto_color="${GREEN}$auto${RESET}" || auto_color="${YELLOW}$auto${RESET}"
     cecho "开机自启：$auto_color"
@@ -180,8 +322,10 @@ while true; do
     cecho " ${GREEN}6${RESET}. 设置监听端口"
     cecho " ${GREEN}7${RESET}. 设置开机自启"
     cecho " ${GREEN}8${RESET}. 关闭开机自启"
-    cecho " ${GREEN}9${RESET}. 查看日志"
-    cecho "${RED}10${RESET}. 卸载"
+    cecho " ${GREEN}9${RESET}. 检查更新"
+    cecho "${GREEN}10${RESET}. 在线更新"
+    cecho "${GREEN}11${RESET}. 查看日志"
+    cecho "${RED}12${RESET}. 卸载"
     cecho " ${WHITE_BG}0${RESET}. 退出"
     cecho "${BLUE}----------------------------------------${RESET}"
     printf "%b" "${YELLOW}请输入选项 > ${RESET}"
@@ -195,10 +339,11 @@ while true; do
         6) set_port; pause ;;
         7) enable_autostart; pause ;;
         8) disable_autostart; pause ;;
-        9) "$START_SH" log 80; pause ;;
-        10) uninstall_rmmon ;;
+        9) "$UPDATE_SH" check; pause ;;
+        10) "$UPDATE_SH" install; pause ;;
+        11) "$START_SH" log 80; pause ;;
+        12) uninstall_rmmon ;;
         0|"") exit 0 ;;
         *) cecho "${RED}输入无效${RESET}"; pause ;;
     esac
 done
-

@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   test:
@@ -23,20 +23,67 @@ jobs:
           curl -fsSL https://cdn.jsdelivr.net/npm/echarts@5.6.0/dist/echarts.min.js -o web/echarts.min.js
           echo "bf4a223524e40b77c304bec67e1222cf551f14880cf42c69dc046558e11c07b1  web/echarts.min.js" | sha256sum -c -
       - name: Test
-        run: go test ./...
+        run: |
+          go test ./...
+          go test -tags=unit -coverprofile=coverage.out ./...
+          go tool cover -func=coverage.out
+          awk '/^total:/ { sub(/%/, "", $3); if ($3 < 80) exit 1 }' <(go tool cover -func=coverage.out)
+      - name: Test service scripts
+        run: |
+          go build -ldflags="-X main.version=$(cat VERSION)" -o "$RUNNER_TEMP/router-monitor-test" .
+          test "$("$RUNNER_TEMP/router-monitor-test" -version)" = "$(cat VERSION)"
+          sh scripts/start_integration_test.sh "$RUNNER_TEMP/router-monitor-test"
+      - name: Test scripts with BusyBox ash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y busybox-static
+          ln -s "$(command -v busybox)" "$RUNNER_TEMP/ash"
+          for script in scripts/install.sh scripts/rmmon scripts/start.sh scripts/update.sh; do
+            "$RUNNER_TEMP/ash" -n "$script"
+          done
+          RUN_SH="$RUNNER_TEMP/ash" sh scripts/start_integration_test.sh "$RUNNER_TEMP/router-monitor-test"
+          SH="$RUNNER_TEMP/ash" python3 update_integration_test.py
       - name: Build ARM64
         env:
           CGO_ENABLED: "0"
           GOOS: linux
           GOARCH: arm64
-        run: go build -trimpath -ldflags="-s -w" -o bin/router-monitor_linux_arm64 .
-      - name: Publish generated assets
-        if: ${{ github.event_name == 'push' && github.actor != 'github-actions[bot]' }}
+        run: go build -trimpath -ldflags="-s -w -X main.version=$(cat VERSION)" -o bin/router-monitor_linux_arm64 .
+      - name: Generate and test release assets
         run: |
-          git add web/echarts.min.js bin/router-monitor_linux_arm64
+          sh scripts/generate_checksums.sh
+          python3 release_test.py
+          python3 update_integration_test.py
+  publish:
+    needs: test
+    if: ${{ github.event_name == 'push' && github.actor != 'github-actions[bot]' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Restore vendored ECharts when bootstrapping the repository
+        if: ${{ !hashFiles('web/echarts.min.js') }}
+        run: |
+          curl -fsSL https://cdn.jsdelivr.net/npm/echarts@5.6.0/dist/echarts.min.js -o web/echarts.min.js
+          echo "bf4a223524e40b77c304bec67e1222cf551f14880cf42c69dc046558e11c07b1  web/echarts.min.js" | sha256sum -c -
+      - name: Build release assets
+        env:
+          CGO_ENABLED: "0"
+          GOOS: linux
+          GOARCH: arm64
+        run: |
+          go build -trimpath -ldflags="-s -w -X main.version=$(cat VERSION)" -o bin/router-monitor_linux_arm64 .
+          sh scripts/generate_checksums.sh
+      - name: Publish generated assets
+        run: |
+          git add web/echarts.min.js bin/router-monitor_linux_arm64 checksums.txt
           git diff --cached --quiet && exit 0
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git commit -m "build: refresh ARM64 release assets"
           git push
-
